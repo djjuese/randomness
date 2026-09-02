@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"github.com/Trisia/randomness"
+	"github.com/Trisia/randomness/detect"
 )
 
 // ReportFormatter 报告格式化接口
@@ -32,21 +36,18 @@ type ReportCollector struct {
 	format       string     // 输出格式 (csv/json)
 	reportPath   string     // 报告输出路径
 	analysisPath string     // 分析报告输出路径
-	threshold    float64    // 通过判定阈值
 }
 
 // NewReportCollector 创建新的数据收集器
 // - format: 输出格式 (csv/json/xml)
 // - reportPath: 报告输出路径
 // - analysisPath: 分析报告输出路径
-// - threshold: 通过判定阈值 (0.0-1.0)
-func NewReportCollector(format, reportPath, analysisPath string, threshold float64) *ReportCollector {
+func NewReportCollector(format, reportPath, analysisPath string) *ReportCollector {
 	return &ReportCollector{
 		results:      make([]*R, 0),
 		format:       format,
 		reportPath:   reportPath,
 		analysisPath: analysisPath,
-		threshold:    threshold,
 	}
 }
 
@@ -101,38 +102,9 @@ func (c *ReportCollector) generateTestReport(results []*R, outputPath string) er
 
 // generateAnalysisReport 生成分析报告
 func (c *ReportCollector) generateAnalysisReport(results []*R, outputPath string) error {
-	// 统计每个检测项目的通过情况
-	var analysisResults []AnalysisResult
-	totalFiles := len(results)
-
-	if totalFiles == 0 {
-		return nil
-	}
-
-	// 遍历所有检测项目
-	for i, testItem := range results[0].TestItems {
-		passCount := 0
-
-		for _, result := range results {
-			if i < len(result.TestItems) {
-				// 根据GM/T 0005-2021规范：P >= 0.01 且 Q >= 0.0001
-				if result.TestItems[i].PValue >= 0.01 && result.TestItems[i].QValue >= 0.0001 {
-					passCount++
-				}
-			}
-		}
-
-		passRate := float64(passCount) / float64(totalFiles)
-		isPassed := passRate >= c.threshold
-
-		analysisResults = append(analysisResults, AnalysisResult{
-			TestName:    testItem.TestName,
-			PassCount:   passCount,
-			TotalCount:  totalFiles,
-			PassRate:    passRate,
-			Requirement: c.threshold,
-			IsPassed:    isPassed,
-		})
+	analysisResults, err := analyzeResults(results)
+	if err != nil {
+		return err
 	}
 
 	// 创建输出文件
@@ -145,6 +117,74 @@ func (c *ReportCollector) generateAnalysisReport(results []*R, outputPath string
 
 	formatter := getFormatter(c.format)
 	return formatter.FormatAnalysisReport(analysisResults, file)
+}
+
+// analyzeResults applies GM/T 0005-2021 clauses 6.1 through 6.4. P_value is
+// used only for the sample pass count. The complete set of Q_values is divided
+// into ten equal intervals and tested for uniformity; alpha_T applies to the
+// resulting P_T, never to an individual sample's Q_value.
+func analyzeResults(results []*R) ([]AnalysisResult, error) {
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	total := len(results)
+	required := detect.Threshold(total)
+	sampleCountPassed := total == 1000
+	items := make([]AnalysisResult, 0, len(results[0].TestItems))
+
+	for itemIndex, first := range results[0].TestItems {
+		passCount := 0
+		qValues := make([]float64, 0, total)
+		bins := [10]int{}
+
+		for _, result := range results {
+			if len(result.TestItems) != len(results[0].TestItems) ||
+				result.TestItems[itemIndex].TestName != first.TestName {
+				return nil, fmt.Errorf("inconsistent test item layout in %s", result.Name)
+			}
+			item := result.TestItems[itemIndex]
+			if math.IsNaN(item.PValue) || math.IsInf(item.PValue, 0) || item.PValue < 0 || item.PValue > 1 ||
+				math.IsNaN(item.QValue) || math.IsInf(item.QValue, 0) || item.QValue < 0 || item.QValue > 1 {
+				return nil, fmt.Errorf("invalid P/Q value for %s in %s", first.TestName, result.Name)
+			}
+			if item.PValue >= randomness.Alpha {
+				passCount++
+			}
+			qValues = append(qValues, item.QValue)
+			bin := int(item.QValue * 10)
+			if bin == 10 { // Q=1 belongs to the closed final interval [0.9, 1].
+				bin = 9
+			}
+			bins[bin]++
+		}
+
+		expected := float64(total) / 10.0
+		chiSquare := 0.0
+		for _, count := range bins {
+			delta := float64(count) - expected
+			chiSquare += delta * delta / expected
+		}
+		uniformityP := detect.ThresholdQ(qValues)
+		passCountPassed := passCount >= required
+		uniformityPassed := uniformityP >= randomness.AlphaT
+
+		items = append(items, AnalysisResult{
+			TestName:          first.TestName,
+			PassCount:         passCount,
+			TotalCount:        total,
+			RequiredPassCount: required,
+			PassRate:          float64(passCount) / float64(total),
+			PassCountPassed:   passCountPassed,
+			QBins:             bins,
+			QChiSquare:        chiSquare,
+			QUniformityP:      uniformityP,
+			QUniformityPassed: uniformityPassed,
+			SampleCountPassed: sampleCountPassed,
+			IsPassed:          sampleCountPassed && passCountPassed && uniformityPassed,
+		})
+	}
+	return items, nil
 }
 
 // JSONFormatter JSON格式输出
@@ -201,7 +241,11 @@ func (f *CSVFormatter) FormatAnalysisReport(results []AnalysisResult, w io.Write
 	defer writer.Flush()
 
 	// 写入CSV表头
-	headers := []string{"检测项目（含参数）", "通过数", "检测数", "通过率", "满足随机性要求", "是否通过"}
+	headers := []string{
+		"检测项目（含参数）", "P通过数", "样本数", "P通过数门限", "P通过率", "P通过率是否通过",
+		"Q值十区间计数", "Q均匀性卡方值", "Q均匀性P_T", "Q均匀性门限", "Q均匀性是否通过",
+		"样本数是否为1000", "最终判定",
+	}
 	if err := writer.Write(headers); err != nil {
 		return err
 	}
@@ -209,19 +253,20 @@ func (f *CSVFormatter) FormatAnalysisReport(results []AnalysisResult, w io.Write
 	// 写入数据
 	for _, result := range results {
 		passRateStr := fmt.Sprintf("%.4f", result.PassRate)
-		requirementStr := fmt.Sprintf("%.3f", result.Requirement)
-		isPassedStr := "是"
-		if !result.IsPassed {
-			isPassedStr = "否"
-		}
-
 		record := []string{
 			result.TestName,
 			strconv.Itoa(result.PassCount),
 			strconv.Itoa(result.TotalCount),
+			strconv.Itoa(result.RequiredPassCount),
 			passRateStr,
-			requirementStr,
-			isPassedStr,
+			yesNo(result.PassCountPassed),
+			fmt.Sprint(result.QBins),
+			fmt.Sprintf("%.12g", result.QChiSquare),
+			fmt.Sprintf("%.12g", result.QUniformityP),
+			fmt.Sprintf("%.4g", randomness.AlphaT),
+			yesNo(result.QUniformityPassed),
+			yesNo(result.SampleCountPassed),
+			yesNo(result.IsPassed),
 		}
 		if err := writer.Write(record); err != nil {
 			return err
@@ -229,6 +274,13 @@ func (f *CSVFormatter) FormatAnalysisReport(results []AnalysisResult, w io.Write
 	}
 
 	return nil
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "是"
+	}
+	return "否"
 }
 
 // XMLFormatter XML格式输出
@@ -276,8 +328,11 @@ func (f *XMLFormatter) FormatAnalysisReport(results []AnalysisResult, w io.Write
 			isPassedStr = "false"
 		}
 
-		_, err = w.Write([]byte(fmt.Sprintf("  <Test name=\"%s\" passCount=\"%d\" totalCount=\"%d\" passRate=\"%.4f\" requirement=\"%.3f\" isPassed=\"%s\"/>\n",
-			result.TestName, result.PassCount, result.TotalCount, result.PassRate, result.Requirement, isPassedStr)))
+		_, err = w.Write([]byte(fmt.Sprintf("  <Test name=\"%s\" passCount=\"%d\" totalCount=\"%d\" requiredPassCount=\"%d\" passRate=\"%.4f\" qBins=\"%v\" qChiSquare=\"%.12g\" qUniformityPT=\"%.12g\" qUniformityThreshold=\"%.4g\" passCountPassed=\"%t\" qUniformityPassed=\"%t\" sampleCountPassed=\"%t\" isPassed=\"%s\"/>\n",
+			result.TestName, result.PassCount, result.TotalCount, result.RequiredPassCount,
+			result.PassRate, result.QBins, result.QChiSquare, result.QUniformityP,
+			randomness.AlphaT, result.PassCountPassed, result.QUniformityPassed,
+			result.SampleCountPassed, isPassedStr)))
 		if err != nil {
 			return err
 		}

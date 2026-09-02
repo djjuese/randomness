@@ -27,12 +27,18 @@ type R struct {
 
 // AnalysisResult 分析报告结果
 type AnalysisResult struct {
-	TestName    string  `json:"检测项目"`
-	PassCount   int     `json:"通过数"`
-	TotalCount  int     `json:"检测数"`
-	PassRate    float64 `json:"通过率"`
-	Requirement float64 `json:"满足随机性要求"`
-	IsPassed    bool    `json:"是否通过"`
+	TestName          string  `json:"检测项目"`
+	PassCount         int     `json:"P通过数"`
+	TotalCount        int     `json:"样本数"`
+	RequiredPassCount int     `json:"P通过数门限"`
+	PassRate          float64 `json:"P通过率"`
+	PassCountPassed   bool    `json:"P通过率是否通过"`
+	QBins             [10]int `json:"Q值十区间计数"`
+	QChiSquare        float64 `json:"Q均匀性卡方值"`
+	QUniformityP      float64 `json:"Q均匀性P_T"`
+	QUniformityPassed bool    `json:"Q均匀性是否通过"`
+	SampleCountPassed bool    `json:"样本数是否为1000"`
+	IsPassed          bool    `json:"最终判定"`
 }
 
 // 结果集写入文件工作器
@@ -62,7 +68,7 @@ func init() {
 	flag.StringVar(&reportPath, "o", "RandomnessTestReport.csv", "生成的检测报告位置")
 	flag.StringVar(&analysisPath, "a", "", "生成的分析报告位置（可选）")
 	flag.StringVar(&outputFormat, "f", "csv", "输出格式 (csv/json/xml)")
-	flag.Float64Var(&passThreshold, "t", 0.981, "通过判定阈值（默认98.1%）")
+	flag.Float64Var(&passThreshold, "t", 0.981, "兼容参数；GM/T 0005分析固定按第6.2节公式计算")
 	flag.IntVar(&NumWorkers, "n", runtime.NumCPU(), "工作线程数 (在大数据检测时通过该参数控制并行数量防止内存不足问题)")
 	flag.Usage = usage
 
@@ -72,9 +78,9 @@ func init() {
 func usage() {
 	_, _ = fmt.Fprintf(os.Stderr, `randomness 随机性检测 rddetector v%s 使用说明
 
-rddetector -i 待检测数据目录 [-o 生成报告位置] [-a 分析报告位置] [-f 输出格式] [-t 通过阈值]
+rddetector -i 待检测数据目录 [-o 生成报告位置] [-a 分析报告位置] [-f 输出格式]
 
-	示例: rddetector -i /data/target/ -o RandomnessTestReport.csv -a AnalysisReport.csv -f csv -t 0.981
+	示例: rddetector -i /data/target/ -o RandomnessTestReport.csv -a AnalysisReport.csv -f csv
 	示例: rddetector -i /data/target/ -o RandomnessTestReport.json -a AnalysisReport.json -f json
 
 	数据规模将由程序自动推断，支持单文件规模 [20 000 bit, 1 000 000 bit, 100 000 000 bit]
@@ -121,7 +127,7 @@ func main() {
 	start := time.Now()
 
 	// 创建统一数据收集器
-	collector := NewReportCollector(outputFormat, reportPath, analysisPath, passThreshold)
+	collector := NewReportCollector(outputFormat, reportPath, analysisPath)
 
 	// 启动数据写入消费者
 	go resultWriter(out, collector, &wg)

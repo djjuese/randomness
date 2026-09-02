@@ -111,9 +111,12 @@ func worker_1E6(jobs <-chan string, out chan<- *R) {
 		log.Printf("[%s] 近似熵检测 m=5 P: %.5f Q: %.5f", filename, p, q)
 
 		// [13] 线性复杂度检测
-		p, q = randomness.LinearComplexityTest(bits)
+		p, q = randomness.LinearComplexityProto(bits, 500)
 		testItems = append(testItems, TestItem{PValue: p, QValue: q, TestName: "线性复杂度检测 m=500"})
 		log.Printf("[%s] 线性复杂度检测 m=500 P: %.5f Q: %.5f", filename, p, q)
+		p, q = randomness.LinearComplexityProto(bits, 1000)
+		testItems = append(testItems, TestItem{PValue: p, QValue: q, TestName: "线性复杂度检测 m=1000"})
+		log.Printf("[%s] 线性复杂度检测 m=1000 P: %.5f Q: %.5f", filename, p, q)
 
 		// [14] Maurer通用统计检测
 		p, q = randomness.MaurerUniversalTest(bits)
