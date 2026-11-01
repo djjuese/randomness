@@ -52,21 +52,20 @@ func FrequencyWithinBlockProto(bits []bool, m int) (float64, float64) {
 	}
 	bits = bits[:N*m]
 
-	var Pi float64 = 0
 	var V float64 = 0
 	var P float64 = 0
 
-	var b bool
+	offset := 0
 	for i := 0; i < N; i++ {
-		Pi = 0
-		for j := 0; j < m; j++ {
-			b, bits = bits[0], bits[1:]
-			if b {
-				Pi++
+		ones := 0
+		end := offset + m
+		for offset < end {
+			if bits[offset] {
+				ones++
 			}
+			offset++
 		}
-		Pi = Pi / float64(m)
-		Pi = Pi - 0.5
+		Pi := float64(ones)/float64(m) - 0.5
 		V += Pi * Pi
 	}
 	V *= 2.0 * float64(m) // 这一步本来V要乘以4，现在改为2，免得后一步再除以2。

@@ -44,13 +44,14 @@ func LinearComplexityProto(bits []bool, m int) (float64, float64) {
 		panic("please provide valid test bits")
 	}
 
-	// 根据数据量选择串行或并行策略
-	// 阈值设定：当数据块数量少于 50 或总数据量少于 50000 bits 时使用串行
-	if N < 50 || n < 50000 {
-		return LinearComplexityProtoSerial(bits, m)
+	// Bit-parallel Berlekamp-Massey is already word-parallel. Extra goroutines
+	// only pay off for large blocks (GM/T 1e8, m=5000). The 1e6-bit detector
+	// runs one sample per CPU; spawning NumCPU workers inside each sample
+	// oversubscribes the machine and makes the outer pool slower.
+	if m >= 5000 && N >= 50 && n >= 50000 {
+		return LinearComplexityProtoParallel(bits, m)
 	}
-
-	return LinearComplexityProtoParallel(bits, m)
+	return LinearComplexityProtoSerial(bits, m)
 }
 
 // LinearComplexityProtoSerial 串行版本的线性复杂度检测

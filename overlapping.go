@@ -71,12 +71,22 @@ func OverlappingTemplateMatchingProto(bits []bool, m int) (p1 float64, p2 float6
 	// 本来这里需要取bits后面预先插入bits[:m-1]，使得bits[m-1:]的长度依然是n。
 	// 现在改成不对bits切片做预处理，而是取位时对索引进行模操作。
 	//
-	// Step 2
+	// Step 2. The standard wraps the first m-1 bits onto the end.
+	// Split that wrap so the hot loop does not divide by n.
 	tmp := subsequencepattern(bits, m-1)
 
-	for i := m - 1; i < n+m-1; i++ {
+	for i := m - 1; i < n; i++ {
 		tmp <<= 1
-		if bits[i%n] { // i % n is used to avoid appending m-1 bits in the end
+		if bits[i] {
+			tmp++
+		}
+		patterns1[tmp&mask1]++
+		patterns2[tmp&mask2]++
+		patterns3[tmp&mask3]++
+	}
+	for i := 0; i < m-1; i++ {
+		tmp <<= 1
+		if bits[i] {
 			tmp++
 		}
 		patterns1[tmp&mask1]++

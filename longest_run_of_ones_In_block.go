@@ -81,27 +81,34 @@ func LongestRunOfOnesInABlockProto(bits []bool, checkOne bool) (float64, float64
 	// Step 2
 	v := make([]float64, param.k+1)
 	var lr1, mlr1 int
-	var b bool
+	offset := 0
 	for i := 0; i < N; i++ {
 		lr1 = 0
 		mlr1 = 0
-
-		for j := 0; j < param.m; j++ {
-			b, bits = bits[0], bits[1:]
-			if checkOne {
-				if b {
+		end := offset + param.m
+		if checkOne {
+			for offset < end {
+				if bits[offset] {
 					lr1++
-					mlr1 = max(mlr1, lr1)
+					if lr1 > mlr1 {
+						mlr1 = lr1
+					}
 				} else {
 					lr1 = 0
 				}
-			} else {
-				if b {
+				offset++
+			}
+		} else {
+			for offset < end {
+				if bits[offset] {
 					lr1 = 0
 				} else {
 					lr1++
-					mlr1 = max(mlr1, lr1)
+					if lr1 > mlr1 {
+						mlr1 = lr1
+					}
 				}
+				offset++
 			}
 		}
 		if mlr1 < param.startV {

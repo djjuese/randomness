@@ -200,63 +200,6 @@ func rowEchelon(matrix [][]int, m int) {
 	}
 }
 
-func linearComplexity(a []bool, M int) int {
-	var N_ int = 0
-	var L int = 0
-	var m int = -1
-	var d int = 0
-
-	// 预分配数组并初始化
-	B_ := make([]int, M)
-	C := make([]int, M)
-	P := make([]int, M)
-	T := make([]int, M)
-
-	C[0] = 1
-	B_[0] = 1
-
-	for N_ < M {
-		// 计算 d = a[N_] + sum(C[i]*a[N_-i]) mod 2
-		d = b2i(a[N_])
-		for i := 1; i <= L; i++ {
-			if C[i] == 1 {
-				d ^= b2i(a[N_-i])
-			}
-		}
-
-		if d == 1 {
-			// 复制 C 到 T
-			copy(T, C)
-			// 清零 P
-			for i := range P {
-				P[i] = 0
-			}
-
-			// 计算 P = B_ shifted by (N_-m)
-			shift := N_ - m
-			for j := 0; j < M; j++ {
-				if B_[j] == 1 && j+shift < M {
-					P[j+shift] = 1
-				}
-			}
-
-			// C = C + P mod 2 (使用 XOR)
-			for i := 0; i < M; i++ {
-				C[i] ^= P[i]
-			}
-
-			if L <= N_/2 {
-				L = N_ + 1 - L
-				m = N_
-				// 复制 T 到 B_
-				copy(B_, T)
-			}
-		}
-		N_++
-	}
-	return L
-}
-
 func b2i(b bool) int {
 	if b {
 		return 1

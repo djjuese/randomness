@@ -106,12 +106,8 @@ func (f FFT) Transform(x []complex128) []complex128 {
 
 	inputPermutation(x, f.perm)
 
-	butterfly := func(k, o, l, s int) {
-		i := k + o
-		j := i + l
-		x[i], x[j] = x[i]+f.E[k*s]*x[j], x[i]+f.E[s*(k+l)]*x[j]
-	}
-
+	// Inlined butterfly. Both twiddles are applied as multiplies so the
+	// result matches the previous closure form bit for bit.
 	n := 1
 	s := f.N
 	for p := 1; p <= f.p; p++ {
@@ -119,7 +115,12 @@ func (f FFT) Transform(x []complex128) []complex128 {
 		for b := 0; b < s; b++ {
 			o := 2 * b * n
 			for k := 0; k < n; k++ {
-				butterfly(k, o, n, s)
+				i := k + o
+				j := i + n
+				xi := x[i]
+				xj := x[j]
+				x[i] = xi + f.E[k*s]*xj
+				x[j] = xi + f.E[s*(k+n)]*xj
 			}
 		}
 		n <<= 1

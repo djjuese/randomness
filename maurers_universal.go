@@ -57,28 +57,26 @@ func MaurerUniversalTest(bits []bool) (float64, float64) {
 		3.401, 3.410, 3.416, 3.419, 3.421}
 
 	var tmp int = 0
-	var b bool
-	for i := 1; i <= Q; i++ {
+	idx := 0
+	readBlock := func() int {
 		for j := 0; j < L; j++ {
 			tmp <<= 1
-			b, bits = bits[0], bits[1:]
-			if b {
+			if bits[idx] {
 				tmp++
 			}
+			idx++
 		}
-		T[tmp&mask] = i
+		return tmp & mask
+	}
+	for i := 1; i <= Q; i++ {
+		T[readBlock()] = i
 	}
 
+	log2 := math.Log(2.0)
 	for i := Q + 1; i <= Q+K; i++ {
-		for j := 0; j < L; j++ {
-			tmp <<= 1
-			b, bits = bits[0], bits[1:]
-			if b {
-				tmp++
-			}
-		}
-		sum += math.Log(float64(i)-float64(T[tmp&mask])) / math.Log(2.0)
-		T[tmp&mask] = i
+		block := readBlock()
+		sum += math.Log(float64(i)-float64(T[block])) / log2
+		T[block] = i
 	}
 
 	sigma = math.Sqrt(variance[L]/float64(K)) * mutFactorC(L, K)

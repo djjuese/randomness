@@ -12,6 +12,7 @@ package randomness
 
 import (
 	"math"
+	"math/bits"
 )
 
 // Runs 游程总数检测
@@ -22,7 +23,7 @@ func Runs(data []byte) *TestResult {
 
 // RunsTestBytes 游程总数检测
 func RunsTestBytes(data []byte) (float64, float64) {
-	return RunsTest(B2bitArr(data))
+	return runsFromWords(packBytesMSB(data), len(data)*8)
 }
 
 // RunsTest 游程总数检测
@@ -30,6 +31,9 @@ func RunsTest(bits []bool) (float64, float64) {
 	n := len(bits)
 	if n == 0 {
 		panic("please provide test bits")
+	}
+	if n >= 4096 {
+		return runsFromWords(packBools(bits), n)
 	}
 
 	var Pi float64 = 0
@@ -58,5 +62,44 @@ func RunsTest(bits []bool) (float64, float64) {
 
 	// Step 5
 	Q = math.Erfc(V) / 2.0
+	return P, Q
+}
+
+func runsFromWords(w []uint64, n int) (float64, float64) {
+	if n == 0 {
+		panic("please provide test bits")
+	}
+	ones := 0
+	transitions := 0
+	nwords := (n + 63) >> 6
+	var prev uint64
+	for i := 0; i < nwords; i++ {
+		x := w[i]
+		width := 64
+		if i == nwords-1 {
+			if rem := n & 63; rem != 0 {
+				width = rem
+				x &= (uint64(1) << uint(rem)) - 1
+			}
+		}
+		ones += bits.OnesCount64(x)
+		if width > 1 {
+			mask := uint64(1)<<uint(width-1) - 1
+			transitions += bits.OnesCount64((x ^ (x >> 1)) & mask)
+		}
+		if i > 0 && (x&1) != prev {
+			transitions++
+		}
+		if width == 64 {
+			prev = (x >> 63) & 1
+		} else if width > 0 {
+			prev = (x >> uint(width-1)) & 1
+		}
+	}
+	Pi := float64(ones) / float64(n)
+	V_obs := transitions + 1
+	V := (float64(V_obs) - 2.0*float64(n)*Pi*(1.0-Pi)) / (2.0 * math.Sqrt(float64(2*n)) * Pi * (1.0 - Pi))
+	P := math.Erfc(math.Abs(V))
+	Q := math.Erfc(V) / 2.0
 	return P, Q
 }

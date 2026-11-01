@@ -100,10 +100,22 @@ func approximateEntropyOptimizedSmall(bits []bool, pattern []int, blockSize, n i
 	}
 	pattern[currentValue]++
 
-	// 使用滑动窗口，避免重复计算
-	for i := blockSize; i < n+blockSize-1; i++ {
-		// 左移一位并添加新位，然后应用掩码
-		currentValue = ((currentValue << 1) | b2i(bits[i%n])) & mask
+	// Slide across the sequence, then wrap the first blockSize-1 bits.
+	// Splitting the wrap avoids a modulo on every step.
+	for i := blockSize; i < n; i++ {
+		bit := 0
+		if bits[i] {
+			bit = 1
+		}
+		currentValue = ((currentValue << 1) | bit) & mask
+		pattern[currentValue]++
+	}
+	for i := 0; i < blockSize-1; i++ {
+		bit := 0
+		if bits[i] {
+			bit = 1
+		}
+		currentValue = ((currentValue << 1) | bit) & mask
 		pattern[currentValue]++
 	}
 }
